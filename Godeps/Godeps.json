@@ -76,7 +76,7 @@
 		},
 		{
 			"ImportPath": "github.com/docker/libkv",
-			"Rev": "60c7c881345b3c67defc7f93a8297debf041d43c"
+			"Rev": "34e5abb23ff240967472c07ca1dfd1080fdc7d81"
 		},
 		{
 			"ImportPath": "github.com/godbus/dbus",
@@ -132,6 +132,11 @@
 		{
 			"ImportPath": "github.com/vishvananda/netlink",
 			"Rev": "4b5dce31de6d42af5bb9811c6d265472199e0fec"
+		},
+		{
+			"ImportPath": "github.com/boltdb/bolt",
+			"Comment": "v1.0-117-g0f053fa",
+			"Rev": "0f053fabc06119583d61937a0a06ef0ba0f1b301"
 		}
 	]
 }
