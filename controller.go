@@ -123,11 +123,11 @@ type endpointTable map[string]*endpoint
 type sandboxTable map[string]*sandbox
 
 type controller struct {
-	networks  networkTable
-	drivers   driverTable
-	sandboxes sandboxTable
-	cfg       *config.Config
-	store     datastore.DataStore
+	networks                networkTable
+	drivers                 driverTable
+	sandboxes               sandboxTable
+	cfg                     *config.Config
+	globalStore, localStore datastore.DataStore
 	sync.Mutex
 }
 
@@ -148,7 +148,7 @@ func New(cfgOptions ...config.Option) (NetworkController, error) {
 	}
 
 	if cfg != nil {
-		if err := c.initDataStore(); err != nil {
+		if err := c.initGlobalStore(); err != nil {
 			// Failing to initalize datastore is a bad situation to be in.
 			// But it cannot fail creating the Controller
 			log.Debugf("Failed to Initialize Datastore due to %v. Operating in non-clustered mode", err)
@@ -157,6 +157,9 @@ func New(cfgOptions ...config.Option) (NetworkController, error) {
 			// Failing to initalize discovery is a bad situation to be in.
 			// But it cannot fail creating the Controller
 			log.Debugf("Failed to Initialize Discovery : %v", err)
+		}
+		if err := c.initLocalStore(); err != nil {
+			return nil, fmt.Errorf("Failed to Initialize LocalDatastore due to %v.", err)
 		}
 	}
 
@@ -228,9 +231,16 @@ func (c *controller) RegisterDriver(networkType string, driver driverapi.Driver,
 		}
 	}
 
-	if capability.Scope == driverapi.GlobalScope && c.validateDatastoreConfig() {
-		opt[netlabel.KVProvider] = c.cfg.Datastore.Client.Provider
-		opt[netlabel.KVProviderURL] = c.cfg.Datastore.Client.Address
+	if capability.DataScope == datastore.GlobalScope && c.validateGlobalStoreConfig() {
+		opt[netlabel.KVProvider] = c.cfg.GlobalStore.Client.Provider
+		opt[netlabel.KVProviderURL] = c.cfg.GlobalStore.Client.Address
+	}
+
+	if capability.DataScope == datastore.LocalScope {
+		localStoreConfig := c.getLocalStoreConfig(c.cfg)
+		opt[netlabel.KVProvider] = localStoreConfig.Client.Provider
+		opt[netlabel.KVProviderURL] = localStoreConfig.Client.Address
+		opt[netlabel.KVProviderConfig] = localStoreConfig.Client.Config
 	}
 
 	c.Unlock()
@@ -304,6 +314,7 @@ func (c *controller) addNetwork(n *network) error {
 	n.Lock()
 	n.svcRecords = svcMap{}
 	n.driver = dd.driver
+	n.dataScope = dd.capability.DataScope
 	d := n.driver
 	n.Unlock()
 
@@ -511,19 +522,6 @@ func (c *controller) loadDriver(networkType string) (*driverData, error) {
 		return nil, ErrInvalidNetworkDriver(networkType)
 	}
 	return dd, nil
-}
-
-func (c *controller) isDriverGlobalScoped(networkType string) (bool, error) {
-	c.Lock()
-	dd, ok := c.drivers[networkType]
-	c.Unlock()
-	if !ok {
-		return false, types.NotFoundErrorf("driver not found for %s", networkType)
-	}
-	if dd.capability.Scope == driverapi.GlobalScope {
-		return true, nil
-	}
-	return false, nil
 }
 
 func (c *controller) GC() {

@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/docker/libkv/store"
 	"github.com/docker/libnetwork/config"
 	"github.com/docker/libnetwork/datastore"
 	"github.com/docker/libnetwork/driverapi"
@@ -70,7 +71,7 @@ func Init(dc driverapi.DriverCallback) error {
 	once.Do(onceInit)
 
 	c := driverapi.Capability{
-		Scope: driverapi.GlobalScope,
+		DataScope: datastore.GlobalScope,
 	}
 
 	return dc.RegisterDriver(networkType, &driver{
@@ -118,6 +119,10 @@ func (d *driver) Config(option map[string]interface{}) error {
 					Provider: provider.(string),
 					Address:  provURL.(string),
 				},
+			}
+			provConfig, confOk := option[netlabel.KVProviderConfig]
+			if confOk {
+				cfg.Client.Config = provConfig.(*store.Config)
 			}
 			d.store, err = datastore.NewDataStore(cfg)
 			if err != nil {
