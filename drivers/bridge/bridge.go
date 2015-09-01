@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -212,6 +213,8 @@ func (c *networkConfiguration) fromMap(data map[string]interface{}) error {
 			if c.Mtu, err = strconv.Atoi(s); err != nil {
 				return types.BadRequestErrorf("failed to parse Mtu value: %s", err.Error())
 			}
+		} else if mtu, ok := i.(int); ok {
+			c.Mtu = mtu
 		} else {
 			return types.BadRequestErrorf("invalid type for Mtu value")
 		}
@@ -232,6 +235,8 @@ func (c *networkConfiguration) fromMap(data map[string]interface{}) error {
 			if c.EnableIPMasquerade, err = strconv.ParseBool(s); err != nil {
 				return types.BadRequestErrorf("failed to parse EnableIPMasquerade value: %s", err.Error())
 			}
+		} else if enableIPMasquerade, ok := i.(bool); ok {
+			c.EnableIPMasquerade = enableIPMasquerade
 		} else {
 			return types.BadRequestErrorf("invalid type for EnableIPMasquerade value")
 		}
@@ -242,6 +247,8 @@ func (c *networkConfiguration) fromMap(data map[string]interface{}) error {
 			if c.EnableICC, err = strconv.ParseBool(s); err != nil {
 				return types.BadRequestErrorf("failed to parse EnableICC value: %s", err.Error())
 			}
+		} else if enableICC, ok := i.(bool); ok {
+			c.EnableICC = enableICC
 		} else {
 			return types.BadRequestErrorf("invalid type for EnableICC value")
 		}
@@ -265,6 +272,12 @@ func (c *networkConfiguration) fromMap(data map[string]interface{}) error {
 			} else {
 				return types.BadRequestErrorf("failed to parse AddressIPv4 value")
 			}
+		} else if m, ok := i.(map[string]interface{}); ok {
+			nw, err := unmarshalIPNetFromMap(m)
+			if err != nil {
+				return fmt.Errorf("failed to unmarshal AddressIPv4:%v", err)
+			}
+			c.AddressIPv4 = nw
 		} else {
 			return types.BadRequestErrorf("invalid type for AddressIPv4 value")
 		}
@@ -278,6 +291,12 @@ func (c *networkConfiguration) fromMap(data map[string]interface{}) error {
 			} else {
 				return types.BadRequestErrorf("failed to parse FixedCIDR value")
 			}
+		} else if m, ok := i.(map[string]interface{}); ok {
+			nw, err := unmarshalIPNetFromMap(m)
+			if err != nil {
+				return fmt.Errorf("failed to unmarshal FixedCIDR:%v", err)
+			}
+			c.FixedCIDR = nw
 		} else {
 			return types.BadRequestErrorf("invalid type for FixedCIDR value")
 		}
@@ -291,6 +310,12 @@ func (c *networkConfiguration) fromMap(data map[string]interface{}) error {
 			} else {
 				return types.BadRequestErrorf("failed to parse FixedCIDRv6 value")
 			}
+		} else if m, ok := i.(map[string]interface{}); ok {
+			nw, err := unmarshalIPNetFromMap(m)
+			if err != nil {
+				return fmt.Errorf("failed to unmarshal FixedCIDRv6:%v", err)
+			}
+			c.FixedCIDRv6 = nw
 		} else {
 			return types.BadRequestErrorf("invalid type for FixedCIDRv6 value")
 		}
@@ -437,7 +462,8 @@ func (d *driver) Config(option map[string]interface{}) error {
 	defer d.Unlock()
 
 	if d.config != nil {
-		return &ErrConfigExists{}
+		return nil
+		//		return &ErrConfigExists{}
 	}
 
 	genericData, ok := option[netlabel.GenericData]
@@ -533,7 +559,6 @@ func parseNetworkOptions(option options.Generic) (*networkConfiguration, error) 
 	if _, ok := option[netlabel.EnableIPv6]; ok {
 		config.EnableIPv6 = option[netlabel.EnableIPv6].(bool)
 	}
-
 	// Finally validate the configuration
 	if err = config.Validate(); err != nil {
 		return nil, err
@@ -581,6 +606,7 @@ func (d *driver) CreateNetwork(id string, option map[string]interface{}) error {
 
 	// Parse and validate the config. It should not conflict with existing networks' config
 	config, err := parseNetworkOptions(option)
+	logrus.Infof("done parseNetworkOptions %v err %v", config, err)
 	if err != nil {
 		return err
 	}
@@ -1415,4 +1441,23 @@ func electMacAddress(epConfig *endpointConfiguration, ip net.IP) net.HardwareAdd
 		return epConfig.MacAddress
 	}
 	return netutils.GenerateMACFromIP(ip)
+}
+
+func unmarshalIPMask(data []byte) (net.IPMask, error) {
+	var bytes []byte
+	if err := json.Unmarshal([]byte(data), &bytes); err != nil {
+		return nil, err
+	}
+	return net.IPMask(bytes), nil
+}
+
+func unmarshalIPNetFromMap(m map[string]interface{}) (*net.IPNet, error) {
+	ipmask, err := unmarshalIPMask([]byte(fmt.Sprintf("\"%s\"", m["Mask"].(string))))
+	if err != nil {
+		return nil, err
+	}
+	return &net.IPNet{
+		IP:   net.ParseIP(m["IP"].(string)),
+		Mask: ipmask,
+	}, nil
 }

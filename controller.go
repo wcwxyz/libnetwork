@@ -265,7 +265,8 @@ func (c *controller) NewNetwork(networkType, name string, options ...NetworkOpti
 	for _, n := range c.networks {
 		if n.name == name {
 			c.Unlock()
-			return nil, NetworkNameError(name)
+			return n, nil
+//			return nil, NetworkNameError(name)
 		}
 	}
 	c.Unlock()

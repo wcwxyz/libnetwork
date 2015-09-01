@@ -8,6 +8,8 @@ import (
 	"github.com/docker/libnetwork/config"
 	"github.com/docker/libnetwork/datastore"
 	"github.com/docker/libnetwork/options"
+	"github.com/docker/libnetwork/netlabel"
+	"net"
 )
 
 func TestBoltdbBackend(t *testing.T) {
@@ -61,5 +63,46 @@ func testLocalBackend(t *testing.T, provider, url string, storeConfig *store.Con
 	store = ctrl.(*controller).localStore.KVStore()
 	if exists, err := store.Exists(datastore.Key([]string{datastore.EndpointKeyPrefix, string(nw.ID()), string(ep.ID())}...)); exists || err != nil {
 		t.Fatalf("Endpoint key should have been deleted. ")
+	}
+}
+
+func TestLocalRestore(t *testing.T) {
+	netOptions := []config.Option{}
+	netOptions = append(netOptions, config.OptionLocalKVProvider(""))
+
+	ctrl, err := New(netOptions...)
+	if err != nil {
+		t.Fatalf("Error new controller: %v", err)
+	}
+
+	if err := ctrl.ConfigureNetworkDriver("bridge", options.Generic{netlabel.GenericData: options.Generic{}}); err != nil {
+		t.Fatalf("Error initializing bridge driver: %v", err)
+	}
+	_, bipNet, err := net.ParseCIDR("172.18.42.1/16")
+	if err != nil {
+		t.Fatalf("Erorr %v", err)
+	}
+	netOption := options.Generic{
+		"BridgeName":         "docker0",
+		"EnableIPMasquerade": true,
+		"EnableICC":          true,
+		"AddressIPv4":        bipNet,
+	}
+	// Initialize default network on "bridge" with the same name
+	nw, err := ctrl.NewNetwork("bridge", "bridge", NetworkOptionGeneric(options.Generic{netlabel.GenericData: netOption}))
+	if err != nil {
+		t.Fatalf("Error creating default \"bridge\" network: %v", err)
+	}
+	store := ctrl.(*controller).localStore.KVStore()
+	if exists, err := store.Exists(datastore.Key(datastore.NetworkKeyPrefix, string(nw.ID()))); !exists || err != nil {
+		t.Fatalf("Network key should have been created.")
+	}
+
+	if err := ctrl.ConfigureNetworkDriver("bridge", options.Generic{netlabel.GenericData: options.Generic{}}); err != nil {
+		t.Fatalf("Error initializing bridge driver: %v", err)
+	}
+	_, err = ctrl.NewNetwork("bridge", "bridge", NetworkOptionGeneric(options.Generic{netlabel.GenericData: netOption}))
+	if err != nil {
+		t.Fatalf("Error creating default \"bridge\" network: %v", err)
 	}
 }
