@@ -7,7 +7,6 @@ import (
 	"github.com/docker/libkv/store"
 	"github.com/docker/libkv/store/consul"
 	"github.com/docker/libkv/store/etcd"
-	"github.com/docker/libkv/store/mock"
 	"github.com/docker/libkv/store/zookeeper"
 	"github.com/stretchr/testify/assert"
 )
@@ -66,16 +65,6 @@ func TestNewStoreZookeeper(t *testing.T) {
 	}
 }
 
-func TestNewStoreMock(t *testing.T) {
-	kv, err := NewStore(store.MOCK, []string{}, &store.Config{})
-	assert.NoError(t, err)
-	assert.NotNil(t, kv)
-
-	if _, ok := kv.(*mock.Mock); !ok {
-		t.Fatal("Error while initializing mock store")
-	}
-}
-
 func TestNewStoreUnsupported(t *testing.T) {
 	client := "localhost:9999"
 
@@ -88,4 +77,5 @@ func TestNewStoreUnsupported(t *testing.T) {
 	)
 	assert.Error(t, err)
 	assert.Nil(t, kv)
+	assert.Equal(t, "Backend storage not supported yet, please choose one of boltdb, consul, etcd, zk", err.Error())
 }

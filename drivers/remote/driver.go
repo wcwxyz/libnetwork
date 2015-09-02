@@ -6,6 +6,7 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/docker/docker/pkg/plugins"
+	"github.com/docker/libnetwork/datastore"
 	"github.com/docker/libnetwork/driverapi"
 	"github.com/docker/libnetwork/drivers/remote/api"
 	"github.com/docker/libnetwork/types"
@@ -29,7 +30,7 @@ func newDriver(name string, client *plugins.Client) driverapi.Driver {
 func Init(dc driverapi.DriverCallback) error {
 	plugins.Handle(driverapi.NetworkPluginEndpointType, func(name string, client *plugins.Client) {
 		c := driverapi.Capability{
-			Scope: driverapi.GlobalScope,
+			DataScope: datastore.GlobalScope,
 		}
 		if err := dc.RegisterDriver(name, newDriver(name, client), c); err != nil {
 			log.Errorf("error registering driver for %s due to %v", name, err)

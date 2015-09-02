@@ -5,16 +5,16 @@ import (
 	"time"
 
 	"github.com/docker/libkv/store"
+	"github.com/docker/libkv/testutils"
 )
 
 func makeEtcdClient(t *testing.T) store.Store {
 	client := "localhost:4001"
 
-	kv, err := InitializeEtcd(
+	kv, err := New(
 		[]string{client},
 		&store.Config{
 			ConnectionTimeout: 3 * time.Second,
-			EphemeralTTL:      2 * time.Second,
 		},
 	)
 
@@ -29,5 +29,9 @@ func TestEtcdStore(t *testing.T) {
 	kv := makeEtcdClient(t)
 	backup := makeEtcdClient(t)
 
-	store.TestStore(t, kv, backup)
+	testutils.RunTestCommon(t, kv)
+	testutils.RunTestAtomic(t, kv)
+	testutils.RunTestWatch(t, kv)
+	testutils.RunTestLock(t, kv)
+	testutils.RunTestTTL(t, kv, backup)
 }

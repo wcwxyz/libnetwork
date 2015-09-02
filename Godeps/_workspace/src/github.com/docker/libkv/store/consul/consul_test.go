@@ -5,17 +5,17 @@ import (
 	"time"
 
 	"github.com/docker/libkv/store"
+	"github.com/docker/libkv/testutils"
 	"github.com/stretchr/testify/assert"
 )
 
 func makeConsulClient(t *testing.T) store.Store {
 	client := "localhost:8500"
 
-	kv, err := InitializeConsul(
+	kv, err := New(
 		[]string{client},
 		&store.Config{
 			ConnectionTimeout: 3 * time.Second,
-			EphemeralTTL:      2 * time.Second,
 		},
 	)
 
@@ -30,7 +30,11 @@ func TestConsulStore(t *testing.T) {
 	kv := makeConsulClient(t)
 	backup := makeConsulClient(t)
 
-	store.TestStore(t, kv, backup)
+	testutils.RunTestCommon(t, kv)
+	testutils.RunTestAtomic(t, kv)
+	testutils.RunTestWatch(t, kv)
+	testutils.RunTestLock(t, kv)
+	testutils.RunTestTTL(t, kv, backup)
 }
 
 func TestGetActiveSession(t *testing.T) {
@@ -42,7 +46,7 @@ func TestGetActiveSession(t *testing.T) {
 	value := []byte("bar")
 
 	// Put the first key with the Ephemeral flag
-	err := kv.Put(key, value, &store.WriteOptions{Ephemeral: true})
+	err := kv.Put(key, value, &store.WriteOptions{TTL: 2 * time.Second})
 	assert.NoError(t, err)
 
 	// Session should not be empty

@@ -4,12 +4,16 @@ import (
 	"strings"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/docker/libkv/store"
 	zk "github.com/samuel/go-zookeeper/zk"
 )
 
-const defaultTimeout = 10 * time.Second
+const (
+	// SOH control character
+	SOH = "\x01"
+
+	defaultTimeout = 10 * time.Second
+)
 
 // Zookeeper is the receiver type for
 // the Store interface
@@ -25,9 +29,9 @@ type zookeeperLock struct {
 	value  []byte
 }
 
-// InitializeZookeeper creates a new Zookeeper client
-// given a list of endpoints and an optional tls config
-func InitializeZookeeper(endpoints []string, options *store.Config) (store.Store, error) {
+// New creates a new Zookeeper client given a
+// list of endpoints and an optional tls config
+func New(endpoints []string, options *store.Config) (store.Store, error) {
 	s := &Zookeeper{}
 	s.timeout = defaultTimeout
 
@@ -41,7 +45,6 @@ func InitializeZookeeper(endpoints []string, options *store.Config) (store.Store
 	// Connect to Zookeeper
 	conn, _, err := zk.Connect(endpoints, s.timeout)
 	if err != nil {
-		log.Error(err)
 		return nil, err
 	}
 	s.client = conn
@@ -58,13 +61,18 @@ func (s *Zookeeper) setTimeout(time time.Duration) {
 // to use in conjunction to Atomic calls
 func (s *Zookeeper) Get(key string) (pair *store.KVPair, err error) {
 	resp, meta, err := s.client.Get(store.Normalize(key))
+
 	if err != nil {
+		if err == zk.ErrNoNode {
+			return nil, store.ErrKeyNotFound
+		}
 		return nil, err
 	}
 
-	// If resp is nil, the key does not exist
-	if resp == nil {
-		return nil, store.ErrKeyNotFound
+	// FIXME handle very rare cases where Get returns the
+	// SOH control character instead of the actual value
+	if string(resp) == SOH {
+		return s.Get(store.Normalize(key))
 	}
 
 	pair = &store.KVPair{
@@ -106,8 +114,8 @@ func (s *Zookeeper) Put(key string, value []byte, opts *store.WriteOptions) erro
 	}
 
 	if !exists {
-		if opts != nil && opts.Ephemeral {
-			s.createFullPath(store.SplitKey(key), opts.Ephemeral)
+		if opts != nil && opts.TTL > 0 {
+			s.createFullPath(store.SplitKey(key), true)
 		} else {
 			s.createFullPath(store.SplitKey(key), false)
 		}
@@ -222,6 +230,9 @@ func (s *Zookeeper) WatchTree(directory string, stopCh <-chan struct{}) (<-chan 
 func (s *Zookeeper) List(directory string) ([]*store.KVPair, error) {
 	keys, stat, err := s.client.Children(store.Normalize(directory))
 	if err != nil {
+		if err == zk.ErrNoNode {
+			return nil, store.ErrKeyNotFound
+		}
 		return nil, err
 	}
 
@@ -231,6 +242,10 @@ func (s *Zookeeper) List(directory string) ([]*store.KVPair, error) {
 	for _, key := range keys {
 		pair, err := s.Get(directory + store.Normalize(key))
 		if err != nil {
+			// If node is not found: List is out of date, retry
+			if err == zk.ErrNoNode {
+				return s.List(directory)
+			}
 			return nil, err
 		}
 
@@ -267,23 +282,47 @@ func (s *Zookeeper) DeleteTree(directory string) error {
 // AtomicPut put a value at "key" if the key has not been
 // modified in the meantime, throws an error if this is the case
 func (s *Zookeeper) AtomicPut(key string, value []byte, previous *store.KVPair, _ *store.WriteOptions) (bool, *store.KVPair, error) {
-	if previous == nil {
-		return false, nil, store.ErrPreviousNotSpecified
-	}
 
-	meta, err := s.client.Set(store.Normalize(key), value, int32(previous.LastIndex))
-	if err != nil {
-		// Compare Failed
-		if err == zk.ErrBadVersion {
-			return false, nil, store.ErrKeyModified
+	var lastIndex uint64
+	if previous != nil {
+		meta, err := s.client.Set(store.Normalize(key), value, int32(previous.LastIndex))
+		if err != nil {
+			// Compare Failed
+			if err == zk.ErrBadVersion {
+				return false, nil, store.ErrKeyModified
+			}
+			return false, nil, err
 		}
-		return false, nil, err
+		lastIndex = uint64(meta.Version)
+	} else {
+		// Interpret previous == nil as create operation.
+		_, err := s.client.Create(store.Normalize(key), value, 0, zk.WorldACL(zk.PermAll))
+		if err != nil {
+			// Zookeeper will complain if the directory doesn't exist.
+			if err == zk.ErrNoNode {
+				// Create the directory
+				parts := store.SplitKey(key)
+				parts = parts[:len(parts)-1]
+				if err = s.createFullPath(parts, false); err != nil {
+					// Failed to create the directory.
+					return false, nil, err
+				}
+				if _, err := s.client.Create(store.Normalize(key), value, 0, zk.WorldACL(zk.PermAll)); err != nil {
+					return false, nil, err
+				}
+
+			} else {
+				// Unhandled error
+				return false, nil, err
+			}
+		}
+		lastIndex = 0 // Newly created nodes have version 0.
 	}
 
 	pair := &store.KVPair{
 		Key:       key,
 		Value:     value,
-		LastIndex: uint64(meta.Version),
+		LastIndex: lastIndex,
 	}
 
 	return true, pair, nil
